@@ -1,0 +1,14 @@
+rule:
+  meta:
+    name: r2capa regression capability
+    namespace: test/r2capa
+    authors:
+      - r2capa contributors
+    scopes:
+      static: function
+      dynamic: unsupported
+  features:
+    - and:
+        - api: kernel32.CreateFileW
+        - string: hello from r2
+

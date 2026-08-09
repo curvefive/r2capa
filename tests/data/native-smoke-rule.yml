@@ -1,0 +1,11 @@
+rule:
+  meta:
+    name: identify r2capa native smoke fixture
+    namespace: test/r2capa
+    authors:
+      - CurveFive / Mouse
+    scopes:
+      static: function
+      dynamic: unsupported
+  features:
+    - api: puts

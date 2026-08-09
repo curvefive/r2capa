@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "r2capa"
+version = "0.1.0"
+description = "Run capa against the active radare2 analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "CurveFive" }]
+keywords = ["capa", "radare2", "reverse-engineering", "malware-analysis"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Information Technology",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+]
+dependencies = [
+  "flare-capa>=9.4,<10",
+  "r2pipe>=1.9,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "mypy>=1.15",
+  "pre-commit>=4.2",
+  "pytest>=8.3",
+  "pytest-cov>=6",
+  "ruff>=0.11",
+  "setuptools>=77",
+  "twine>=6",
+]
+
+[project.scripts]
+r2capa = "r2capa.cli:main"
+
+[project.urls]
+Changelog = "https://github.com/curvefive/r2capa/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/curvefive/r2capa#readme"
+Homepage = "https://github.com/curvefive/r2capa"
+Issues = "https://github.com/curvefive/r2capa/issues"
+Repository = "https://github.com/curvefive/r2capa"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers --cov=r2capa --cov-report=term-missing --cov-fail-under=75"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "PIE", "RUF", "SIM", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+files = ["src/r2capa", "scripts"]

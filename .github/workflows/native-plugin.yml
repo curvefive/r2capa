@@ -1,0 +1,59 @@
+name: Native plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugin/**"
+      - "src/**"
+      - "tests/data/native-smoke*"
+      - "pyproject.toml"
+      - ".github/workflows/native-plugin.yml"
+  pull_request:
+    paths:
+      - "plugin/**"
+      - "src/**"
+      - "tests/data/native-smoke*"
+      - "pyproject.toml"
+      - ".github/workflows/native-plugin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build radare2 SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+          git clone --depth 1 --branch 6.2.0 https://github.com/radareorg/radare2 /tmp/radare2
+          /tmp/radare2/sys/install.sh
+          r2 -v | grep -F 'radare2 6.2.0'
+      - name: Build plugin
+        run: |
+          make -C plugin
+          make -C plugin analyze
+      - name: Smoke-test command registration
+        run: |
+          r2 -NN -qc "L plugin/core_r2capa.$(r2 -H R2_LIBEXT);r2capa?" -- \
+            | grep -F 'Usage: r2capa'
+      - name: End-to-end native match
+        run: |
+          python3 -m pip install .
+          cc tests/data/native-smoke.c -o /tmp/r2capa-native-smoke
+          R2CAPA_RULES=tests/data/native-smoke-rule.yml \
+            r2 -NN -A -qc "L plugin/core_r2capa.$(r2 -H R2_LIBEXT);r2capa" \
+            /tmp/r2capa-native-smoke | grep -F 'identify r2capa native smoke fixture'
