@@ -54,7 +54,9 @@ $ r2 sample.exe
 [0x00401000]> r2capa*
 ```
 
-`r2capaf` restricts matching to the current function. `r2capa*` emits an r2 script that creates a
+`r2capaf` restricts matching to the function containing the cursor, including detached basic
+blocks. `r2capaf 0xADDRESS` selects a function by an address inside it; an address outside all
+recovered functions produces an error. `r2capa*` emits an r2 script that creates a
 `capa` flagspace; apply it explicitly with `.r2capa*`. Run `r2capa?` for all commands. The prefix
 avoids radare2's existing `cat` command, which otherwise consumes commands beginning with `capa`.
 

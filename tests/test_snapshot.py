@@ -92,3 +92,21 @@ def test_builder_can_skip_referenced_bytes() -> None:
 
     assert snapshot.data == {}
     assert not any(command.startswith("pxj") for command in r2.commands)
+
+
+def test_zero_addresses_take_precedence_over_legacy_fields() -> None:
+    responses = _responses()
+    responses["ij"] = {
+        "core": {"baseaddr": 0x400000},
+        "bin": {"arch": "x86", "bits": 32, "baddr": 0, "class": "ELF"},
+    }
+    responses["aflj"] = [{"addr": 0, "offset": 0x401000, "size": 4}]
+    responses["pdfj @ 0x0"] = {"ops": [{"addr": 0, "offset": 0x401000, "size": 1, "opcode": "ret"}]}
+    responses["afbj @ 0x0"] = [{"addr": 0, "offset": 0x401000, "size": 4}]
+
+    snapshot = SnapshotBuilder(FakeR2(responses)).build()
+
+    assert snapshot.base_address == 0
+    assert snapshot.functions[0].address == 0
+    assert snapshot.functions[0].blocks[0].address == 0
+    assert snapshot.functions[0].instructions[0].address == 0

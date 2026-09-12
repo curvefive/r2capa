@@ -39,6 +39,11 @@ def _optional_integer(value: Any) -> int | None:
     return None if result < 0 else result
 
 
+def _first_present(*values: Any) -> Any:
+    """Use fallback fields only when absent; zero is a valid address."""
+    return next((value for value in values if value is not None), None)
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -109,7 +114,7 @@ class SnapshotBuilder:
         md5, sha1, sha256 = _hash_file(path)
         return Snapshot(
             path=path,
-            base_address=_integer(bin_info.get("baddr") or core_info.get("baseaddr")),
+            base_address=_integer(_first_present(bin_info.get("baddr"), core_info.get("baseaddr"))),
             format=_format_name(bin_info),
             arch=arch,
             bits=bits,
@@ -168,7 +173,7 @@ class SnapshotBuilder:
     def _functions(self) -> tuple[Function, ...]:
         functions = []
         for record in _records(self.r2.cmdj("aflj")):
-            address = _integer(record.get("addr") or record.get("offset"))
+            address = _integer(_first_present(record.get("addr"), record.get("offset")))
             size = _integer(record.get("size"))
             operations = self._operations(address)
             blocks = self._blocks(address, operations)
@@ -192,7 +197,7 @@ class SnapshotBuilder:
             opex = record.get("opex") if isinstance(record.get("opex"), dict) else {}
             operations.append(
                 Instruction(
-                    address=_integer(record.get("addr") or record.get("offset")),
+                    address=_integer(_first_present(record.get("addr"), record.get("offset"))),
                     size=_integer(record.get("size"), default=1),
                     mnemonic=mnemonic,
                     opcode=opcode,
@@ -215,7 +220,7 @@ class SnapshotBuilder:
             end = max(instruction.address + instruction.size for instruction in operations)
             records = [{"addr": start, "size": end - start}]
         for record in records:
-            address = _integer(record.get("addr") or record.get("offset"))
+            address = _integer(_first_present(record.get("addr"), record.get("offset")))
             size = _integer(record.get("size"))
             block_operations = tuple(
                 operation

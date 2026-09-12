@@ -133,19 +133,25 @@ def _has_loop(function: Function) -> bool:
     visiting: set[int] = set()
     visited: set[int] = set()
 
-    def visit(node: int) -> bool:
-        if node in visiting:
-            return True
-        if node in visited:
-            return False
-        visiting.add(node)
-        if any(visit(target) for target in edges.get(node, ()) if target in edges):
-            return True
-        visiting.remove(node)
-        visited.add(node)
-        return False
-
-    return any(visit(node) for node in edges)
+    # Explicit DFS frames keep large or adversarial CFGs off Python's call stack.
+    for root in edges:
+        if root in visited:
+            continue
+        visiting.add(root)
+        stack = [(root, iter(edges[root]))]
+        while stack:
+            node, successors = stack[-1]
+            target = next(successors, None)
+            if target is None:
+                stack.pop()
+                visiting.remove(node)
+                visited.add(node)
+            elif target in visiting:
+                return True
+            elif target in edges and target not in visited:
+                visiting.add(target)
+                stack.append((target, iter(edges[target])))
+    return False
 
 
 def _printable_immediate_length(value: int) -> int:

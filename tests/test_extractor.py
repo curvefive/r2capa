@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys
+from dataclasses import replace
+
+import pytest
 from capa.features.address import AbsoluteVirtualAddress, FileOffsetAddress
 from capa.features.basicblock import BasicBlock
 from capa.features.common import OS, Arch, Characteristic, Format, String
@@ -7,7 +11,8 @@ from capa.features.file import Export, FunctionName, Import, Section
 from capa.features.insn import API, Mnemonic, Number
 
 from r2capa.extractor import Radare2FeatureExtractor
-from r2capa.model import Snapshot
+from r2capa.model import BasicBlock as ModelBlock
+from r2capa.model import Function, Snapshot
 
 
 def _values(features: list[tuple[object, object]], feature_type: type[object]) -> set[object]:
@@ -72,3 +77,42 @@ def test_unknown_function_filter_is_empty(snapshot: Snapshot) -> None:
     extractor = Radare2FeatureExtractor(snapshot, functions={0xDEADBEEF})
 
     assert list(extractor.get_functions()) == []
+
+
+@pytest.mark.parametrize("cyclic", [False, True])
+def test_large_control_flow_graph(snapshot: Snapshot, cyclic: bool) -> None:
+    count = sys.getrecursionlimit() + 100
+    start = 0x600000
+    blocks = tuple(
+        ModelBlock(
+            start + index,
+            1,
+            jump=start + index + 1 if index + 1 < count else (start if cyclic else None),
+        )
+        for index in range(count)
+    )
+    function = Function(start, count, "large", blocks)
+    extractor = Radare2FeatureExtractor(replace(snapshot, functions=(function,)))
+    features = list(extractor.extract_function_features(next(extractor.get_functions())))
+
+    assert ("loop" in _values(features, Characteristic)) == cyclic
+
+
+@pytest.mark.parametrize("detached_cycle", [False, True])
+def test_shared_successors_and_disconnected_cycles(
+    snapshot: Snapshot, detached_cycle: bool
+) -> None:
+    blocks = (
+        ModelBlock(0, 1, jump=1, fail=2),
+        ModelBlock(1, 1, jump=3),
+        ModelBlock(2, 1, jump=3),
+        ModelBlock(3, 1, jump=0xFFFF),
+    )
+    if detached_cycle:
+        blocks += (ModelBlock(4, 1, jump=5), ModelBlock(5, 1, jump=4))
+    extractor = Radare2FeatureExtractor(
+        replace(snapshot, functions=(Function(0, 6, "diamond", blocks),))
+    )
+    features = list(extractor.extract_function_features(next(extractor.get_functions())))
+
+    assert ("loop" in _values(features, Characteristic)) == detached_cycle

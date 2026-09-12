@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import r2capa.cli as cli
-from r2capa.model import Snapshot
+from r2capa.model import BasicBlock, Snapshot
 from r2capa.snapshot import AnalysisRequiredError
 
 from .conftest import FakeR2
@@ -101,3 +102,58 @@ def test_main_reports_analysis_error(
 
     assert cli.main([]) == 2
     assert "run aaa" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("address", [0x401000, 0x40100C, 0x401020])
+def test_function_address_resolves_containing_function(
+    address: int,
+    snapshot: Snapshot,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _use_snapshot(monkeypatch, snapshot)
+
+    assert cli.run(_arguments(function=address, rules=[RULES], json=True), FakeR2({})) == 0
+    assert "r2capa regression capability" in capsys.readouterr().out
+
+
+def test_function_address_in_detached_block(
+    snapshot: Snapshot, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    function = snapshot.functions[0]
+    detached = BasicBlock(0x500000, 0x10)
+    function = replace(function, blocks=(*function.blocks, detached))
+    _use_snapshot(monkeypatch, replace(snapshot, functions=(function,)))
+
+    assert cli.run(_arguments(function=0x500005, features=True), FakeR2({})) == 0
+    assert "api(kernel32.CreateFileW)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("address", [0xDEADBEEF, 0x401030])
+def test_unknown_function_address_is_an_error(
+    address: int,
+    snapshot: Snapshot,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _use_snapshot(monkeypatch, snapshot)
+
+    assert cli.run(_arguments(function=address, features=True), FakeR2({})) == 2
+    output = capsys.readouterr()
+    assert "no function contains" in output.err
+    assert output.out == ""
+
+
+def test_function_lookup_handles_overlaps_and_gaps(snapshot: Snapshot) -> None:
+    function = snapshot.functions[0]
+    outer = replace(function, size=0x100, blocks=(BasicBlock(0x401000, 0x10),))
+    inner = replace(function, address=0x401008, size=4, blocks=())
+    snapshot = replace(snapshot, functions=(outer, inner))
+
+    assert snapshot.function_at(0x401008) is inner
+    assert snapshot.function_at(0x401010) is None
+    assert snapshot.function_at(0x401080) is None
+
+    snapshot = replace(snapshot, functions=(inner,))
+    assert snapshot.function_at(0x401009) is inner
+    assert snapshot.function_at(0x40100C) is None

@@ -106,11 +106,22 @@ class Snapshot:
         return next((section for section in self.sections if section.contains(address)), None)
 
     def function_at(self, address: int) -> Function | None:
+        # Prefer an exact entry over another function's overlapping blocks.
+        for function in self.functions:
+            if function.address == address:
+                return function
         return next(
             (
                 function
                 for function in self.functions
-                if function.address <= address < function.address + function.size
+                if (
+                    any(
+                        block.address <= address < block.address + block.size
+                        for block in function.blocks
+                    )
+                    if function.blocks
+                    else function.address <= address < function.address + function.size
+                )
             ),
             None,
         )

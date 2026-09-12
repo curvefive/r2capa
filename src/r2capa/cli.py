@@ -23,7 +23,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", type=Path, help="open a file in a new r2 session")
     parser.add_argument("-r", "--rules", action="append", type=Path, default=[])
     parser.add_argument("-A", "--analyze", action="store_true", help="run 'aaa' before capa")
-    parser.add_argument("-f", "--function", type=lambda value: int(value, 0))
+    parser.add_argument(
+        "-f",
+        "--function",
+        type=lambda value: int(value, 0),
+        help="analyze the function containing this address",
+    )
     parser.add_argument("-j", "--json", action="store_true", help="emit capa ResultDocument JSON")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument(
@@ -108,7 +113,13 @@ def run(arguments: argparse.Namespace, r2: R2Client) -> int:
         print(json.dumps(snapshot.to_dict(), default=lambda value: value.hex(), sort_keys=True))
         return 0
 
-    function_filter = {arguments.function} if arguments.function is not None else None
+    function_filter = None
+    if arguments.function is not None:
+        function = snapshot.function_at(arguments.function)
+        if function is None:
+            print(f"error: no function contains {arguments.function:#x}", file=sys.stderr)
+            return 2
+        function_filter = {function.address}
     extractor = Radare2FeatureExtractor(snapshot, functions=function_filter)
     if arguments.features:
         print(json.dumps(list(_feature_records(extractor)), indent=2, sort_keys=True))
