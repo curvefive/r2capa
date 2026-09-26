@@ -175,8 +175,9 @@ class SnapshotBuilder:
         for record in _records(self.r2.cmdj("aflj")):
             address = _integer(_first_present(record.get("addr"), record.get("offset")))
             size = _integer(record.get("size"))
-            operations = self._operations(address)
-            blocks = self._blocks(address, operations)
+            block_records = _records(self.r2.cmdj(f"afbj @ {address:#x}"))
+            operations = self._operations(address, block_records)
+            blocks = self._blocks(block_records, operations)
             functions.append(
                 Function(
                     address=address,
@@ -187,17 +188,23 @@ class SnapshotBuilder:
             )
         return tuple(functions)
 
-    def _operations(self, function_address: int) -> tuple[Instruction, ...]:
+    def _operations(
+        self, function_address: int, block_records: list[dict[str, Any]]
+    ) -> tuple[Instruction, ...]:
         result = self.r2.cmdj(f"pdfj @ {function_address:#x}") or {}
         raw_operations = result.get("ops", []) if isinstance(result, dict) else []
+        operand_details = self._operand_details(block_records)
         operations = []
         for record in _records(raw_operations):
+            address = _integer(_first_present(record.get("addr"), record.get("offset")))
             opcode = str(record.get("opcode") or record.get("disasm") or "")
             mnemonic = str(record.get("mnemonic") or opcode.partition(" ")[0]).lower()
-            opex = record.get("opex") if isinstance(record.get("opex"), dict) else {}
+            opex = record.get("opex")
+            if not isinstance(opex, dict):
+                opex = operand_details.get(address, {})
             operations.append(
                 Instruction(
-                    address=_integer(_first_present(record.get("addr"), record.get("offset"))),
+                    address=address,
                     size=_integer(record.get("size"), default=1),
                     mnemonic=mnemonic,
                     opcode=opcode,
@@ -210,11 +217,24 @@ class SnapshotBuilder:
             )
         return tuple(operations)
 
+    def _operand_details(self, block_records: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+        """pdfj omits operand details; aoj carries them, fetched once per block."""
+        details = {}
+        for block in block_records:
+            count = _integer(block.get("ninstr"))
+            start = _integer(_first_present(block.get("addr"), block.get("offset")))
+            if count <= 0:
+                continue
+            for record in _records(self.r2.cmdj(f"aoj {count} @ {start:#x}")):
+                if isinstance(opex := record.get("opex"), dict):
+                    address = _integer(_first_present(record.get("addr"), record.get("offset")))
+                    details[address] = cast(dict[str, Any], opex)
+        return details
+
     def _blocks(
-        self, function_address: int, operations: tuple[Instruction, ...]
+        self, records: list[dict[str, Any]], operations: tuple[Instruction, ...]
     ) -> tuple[BasicBlock, ...]:
         result = []
-        records = _records(self.r2.cmdj(f"afbj @ {function_address:#x}"))
         if not records and operations:
             start = operations[0].address
             end = max(instruction.address + instruction.size for instruction in operations)

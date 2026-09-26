@@ -8,11 +8,11 @@ from capa.features.address import AbsoluteVirtualAddress, FileOffsetAddress
 from capa.features.basicblock import BasicBlock
 from capa.features.common import OS, Arch, Characteristic, Format, String
 from capa.features.file import Export, FunctionName, Import, Section
-from capa.features.insn import API, Mnemonic, Number
+from capa.features.insn import API, Mnemonic, Number, Offset
 
 from r2capa.extractor import Radare2FeatureExtractor
 from r2capa.model import BasicBlock as ModelBlock
-from r2capa.model import Function, Snapshot
+from r2capa.model import Function, Instruction, Snapshot, Symbol
 
 
 def _values(features: list[tuple[object, object]], feature_type: type[object]) -> set[object]:
@@ -116,3 +116,87 @@ def test_shared_successors_and_disconnected_cycles(
     features = list(extractor.extract_function_features(next(extractor.get_functions())))
 
     assert ("loop" in _values(features, Characteristic)) == detached_cycle
+
+
+def _insn_features(snapshot: Snapshot, instruction: Instruction) -> list[tuple[object, object]]:
+    block = ModelBlock(instruction.address, instruction.size, instructions=(instruction,))
+    function = Function(instruction.address, instruction.size, "sub", (block,))
+    extractor = Radare2FeatureExtractor(replace(snapshot, functions=(function,)))
+    fh = next(extractor.get_functions())
+    bbh = next(extractor.get_basic_blocks(fh))
+    return list(extractor.extract_insn_features(fh, bbh, next(extractor.get_instructions(fh, bbh))))
+
+
+@pytest.mark.parametrize(
+    ("operand", "expected"),
+    [
+        ({"type": "mem", "base": "rcx", "disp": 0x10}, {0x10}),
+        ({"type": "mem", "base": "rbp", "disp": -8}, set()),
+        ({"type": "mem", "base": "rip", "disp": 0x2000}, set()),
+        ({"type": "mem", "disp": 0x403000}, set()),
+    ],
+)
+def test_offsets_require_structure_base(
+    snapshot: Snapshot, operand: dict[str, object], expected: set[int]
+) -> None:
+    instruction = Instruction(
+        0x401000,
+        4,
+        "mov",
+        "mov eax, [...]",
+        opex={"operands": [{"type": "reg", "value": "rdx"}, operand]},
+    )
+
+    assert _values(_insn_features(snapshot, instruction), Offset) == expected
+
+
+def test_stack_adjustment_is_not_a_number(snapshot: Snapshot) -> None:
+    instruction = Instruction(
+        0x401000,
+        4,
+        "add",
+        "add rsp, 0x28",
+        opex={"operands": [{"type": "reg", "value": "rsp"}, {"type": "imm", "value": 0x28}]},
+    )
+    features = _insn_features(snapshot, instruction)
+
+    assert not _values(features, Number)
+    assert not _values(features, Offset)
+
+
+@pytest.mark.parametrize(
+    ("opcode", "peb"),
+    [
+        ("mov eax, dword fs:[0x30]", True),
+        ("mov rax, qword gs:[0x60]", True),
+        ("mov eax, dword fs:[0x300]", False),
+    ],
+)
+def test_peb_access(snapshot: Snapshot, opcode: str, peb: bool) -> None:
+    features = _insn_features(snapshot, Instruction(0x401000, 6, "mov", opcode))
+
+    assert ("peb access" in _values(features, Characteristic)) == peb
+
+
+def test_branch_targets_are_not_numbers(snapshot: Snapshot) -> None:
+    instruction = Instruction(
+        0x401000,
+        5,
+        "call",
+        "call 0x401100",
+        kind="call",
+        jump=0x401100,
+        opex={"operands": [{"type": "imm", "value": 0x401100}]},
+    )
+
+    assert not _values(_insn_features(snapshot, instruction), Number)
+
+
+def test_imports_without_module_have_no_empty_prefix(snapshot: Snapshot) -> None:
+    extractor = Radare2FeatureExtractor(
+        replace(snapshot, imports=(Symbol("__stack_chk_fail", 0x403000),))
+    )
+    imports = _values(list(extractor.extract_file_features()), Import)
+
+    assert "__stack_chk_fail" in imports
+    assert not any(str(name).startswith(".") for name in imports)

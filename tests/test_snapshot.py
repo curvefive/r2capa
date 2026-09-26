@@ -110,3 +110,18 @@ def test_zero_addresses_take_precedence_over_legacy_fields() -> None:
     assert snapshot.functions[0].address == 0
     assert snapshot.functions[0].blocks[0].address == 0
     assert snapshot.functions[0].instructions[0].address == 0
+
+
+def test_operand_details_come_from_aoj_when_pdfj_omits_them() -> None:
+    # radare2 6.2's pdfj has no "opex"; aoj does.
+    responses = _responses()
+    responses["pdfj @ 0x401000"] = {
+        "ops": [{"addr": 0x401000, "size": 3, "opcode": "sub rsp, 0x50", "type": "sub"}]
+    }
+    responses["afbj @ 0x401000"] = [{"addr": 0x401000, "size": 3, "ninstr": 1}]
+    operands = [{"type": "reg", "value": "rsp"}, {"type": "imm", "value": 0x50}]
+    responses["aoj 1 @ 0x401000"] = [{"addr": 0x401000, "opex": {"operands": operands}}]
+
+    snapshot = SnapshotBuilder(FakeR2(responses)).build()
+
+    assert snapshot.functions[0].instructions[0].operands == tuple(operands)

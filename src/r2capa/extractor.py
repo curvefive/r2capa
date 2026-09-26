@@ -48,6 +48,7 @@ from capa.features.insn import (
 from r2capa.model import BasicBlock, Function, Instruction, Snapshot, Symbol
 
 _STACK_REGISTERS = {"bp", "ebp", "rbp", "sp", "esp", "rsp"}
+_PC_REGISTERS = {"eip", "rip"}
 _CALL_KINDS = {"call", "ccall", "icall", "ircall", "rcall", "ucall"}
 _JUMP_KINDS = {"cjmp", "ijmp", "jmp", "mjmp", "rjmp", "ujmp"}
 _GENERIC_FUNCTION_PREFIXES = ("fcn.", "loc.", "sub.")
@@ -75,7 +76,7 @@ def _symbol_names(symbol: Symbol) -> tuple[str, ...]:
         module = module[:-4]
     elif module.lower().endswith(".so"):
         module = module[:-3]
-    return tuple(helpers.generate_symbols(module, name, include_dll=True))
+    return tuple(helpers.generate_symbols(module, name, include_dll=bool(module)))
 
 
 def _operand_type(operand: dict[str, Any]) -> str:
@@ -107,6 +108,16 @@ def _operand_registers(operand: dict[str, Any]) -> set[str]:
         elif isinstance(value, dict):
             registers.update(_operand_registers(value))
     return registers
+
+
+def _is_stack_adjustment(instruction: Instruction) -> bool:
+    operands = instruction.operands
+    return (
+        instruction.mnemonic in {"add", "sub"}
+        and bool(operands)
+        and _operand_type(operands[0]) == "reg"
+        and bool(_operand_registers(operands[0]) & _STACK_REGISTERS)
+    )
 
 
 def _has_stack_reference(instruction: Instruction) -> bool:
@@ -317,9 +328,12 @@ class Radare2FeatureExtractor(StaticFeatureExtractor):  # type: ignore[misc]
     def _extract_numbers_and_offsets(
         self, instruction: Instruction, location: Address
     ) -> Iterator[tuple[Feature, Address]]:
-        if instruction.mnemonic.startswith("ret"):
+        if (
+            instruction.mnemonic.startswith("ret")
+            or instruction.kind in _CALL_KINDS | _JUMP_KINDS
+            or _is_stack_adjustment(instruction)
+        ):
             return
-        stack_reference = _has_stack_reference(instruction)
         for index, operand in enumerate(instruction.operands):
             operand_type = _operand_type(operand)
             if operand_type in {"imm", "immediate"}:
@@ -331,7 +345,12 @@ class Radare2FeatureExtractor(StaticFeatureExtractor):  # type: ignore[misc]
                 if instruction.mnemonic == "add" and 0 < value < MAX_STRUCTURE_SIZE:
                     yield Offset(value), location
                     yield OperandOffset(index, value), location
-            elif operand_type in {"mem", "memory"} and not stack_reference:
+            elif operand_type in {"mem", "memory"}:
+                # Structure offsets need a base register; skip frame, PC-relative,
+                # and absolute references, matching capa's other backends.
+                registers = _operand_registers(operand)
+                if not registers or registers & (_STACK_REGISTERS | _PC_REGISTERS):
+                    continue
                 displacement = _operand_integer(operand, "disp", "displacement")
                 if displacement is None:
                     displacement = 0
@@ -363,13 +382,11 @@ class Radare2FeatureExtractor(StaticFeatureExtractor):  # type: ignore[misc]
             and instruction.jump == instruction.address + instruction.size
         ):
             yield Characteristic("call $+5"), location
-        if "fs:" in opcode or "fs:[" in opcode:
+        if "fs:" in opcode:
             yield Characteristic("fs access"), location
-        if "gs:" in opcode or "gs:[" in opcode:
+        if "gs:" in opcode:
             yield Characteristic("gs access"), location
-        if re.search(r"\bfs:\s*\[?(?:0x)?30\]?", opcode) or re.search(
-            r"\bgs:\s*\[?(?:0x)?60\]?", opcode
-        ):
+        if re.search(r"\b(?:fs:\s*\[?(?:0x)?30|gs:\s*\[?(?:0x)?60)\b", opcode):
             yield Characteristic("peb access"), location
         if instruction.mnemonic == "xor" and len(instruction.operands) >= 2:
             first, second = instruction.operands[:2]
