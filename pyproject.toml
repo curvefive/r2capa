@@ -24,7 +24,7 @@ classifiers = [
   "Topic :: Security",
 ]
 dependencies = [
-  "flare-capa>=9.4,<10",
+  "flare-capa>=9.4,<11",
   "r2pipe>=1.9,<2",
 ]
 
