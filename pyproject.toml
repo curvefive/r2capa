@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = [
   "flare-capa>=9.4,<10",
-  "r2pipe>=1.9,<2",
+  "r2pipe>=1.9,<3",
 ]
 
 [project.optional-dependencies]
